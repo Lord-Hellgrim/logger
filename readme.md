@@ -1,0 +1,1 @@
+A simple library for making permanent logs of a programs activity.
