@@ -1,37 +1,35 @@
+use std::fmt::{Display, self};
 use std::fs;
-use std::fmt::Display;
-use std::fmt;
+use std::mem::{size_of_val};
 
 pub struct LogTimeStamp {
-    pub hours: u64, 
-    pub minutes: u64, 
-    pub seconds: u64,
-    pub days: u64, 
-    pub months: u64, 
-    pub years: u64,
-    pub raw: u64,
+    time: u64,
 }
 
 impl Display for LogTimeStamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{} - {}:{}:{}", self.days, self.months, self.years, self.hours, self.minutes, self.seconds)
+        write!(f, "{}", unix_time_to_real(self.time))
     }
 }
 
-pub fn get_current_time() -> LogTimeStamp {
-    const YEAR: u64 = 365 * 24 * 60 * 60;
-    const DAY: u64 = 24 * 60 * 60;
-    const HOUR: u64 = 60 * 60;
-    const MINUTE: u64 = 60;
-    
-    let time = std::time::SystemTime::now();
+pub fn get_current_time() -> u64 {
 
-    let x = time
+    let x = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs();
 
-    let mut days = (x%YEAR - ((x / YEAR)/4) * DAY) / DAY + 1;
+    x
+
+}
+
+pub fn unix_time_to_real(seconds: u64) -> String {
+    const YEAR: u64 = 365 * 24 * 60 * 60;
+    const DAY: u64 = 24 * 60 * 60;
+    const HOUR: u64 = 60 * 60;
+    const MINUTE: u64 = 60;
+
+    let mut days = (seconds%YEAR - ((seconds / YEAR)/4) * DAY) / DAY + 1;
     let months: u64;
     if days <= 31 { months = 1;}
     else if days > 31 && days <= 59 {months = 2; days -= 31}
@@ -47,44 +45,24 @@ pub fn get_current_time() -> LogTimeStamp {
     else if days > 334 && days <= 366 {months = 12; days -= 334}
     else {months = 12;}
 
-    LogTimeStamp {
-        hours: (x%DAY)/HOUR, 
-        minutes: (x%HOUR)/MINUTE, 
-        seconds: x%MINUTE,
-        days: days, 
-        months: months, 
-        years: 1970 + x / YEAR,
-        raw: x,
-    }
-
+    format!("{}.{}.{} - {}:{}:{}", days, months, 1970 + seconds / YEAR, (seconds%DAY)/HOUR, (seconds%HOUR)/MINUTE, seconds%MINUTE)
 }
 
 
 pub struct Logger {
-    log: String,
+    log: Vec<String>,
     path: String,
     pub log_size: usize,
     logs_made: u16,
-    loghead: LogTimeStamp,
+    loghead: u64,
 }
 
-impl Drop for Logger {
-    fn drop(&mut self) {
-        let stamp = get_current_time();
-        let log_path = format!("{}/{}.txt", self.path, stamp);
-            match fs::write(log_path, &self.log) {
-                Ok(_) => self.logs_made += 1,
-                Err(_) => panic!()
-
-            };
-    }
-}
 
 impl Logger {
-
+    
     pub fn new(log_folder: String) -> Logger{
         Logger {
-            log: "".to_owned(),
+            log: Vec::new(),
             path: log_folder,
             log_size: 0,
             logs_made: 0,
@@ -94,27 +72,44 @@ impl Logger {
 
     pub fn add(&mut self, s: &str) {
         if s.len() > 1024 {
-            self.add("Attempted to log an entry larger than 1024 bytes");
+            self.log.push(format!("{}; {}\n", unix_time_to_real(get_current_time()), "Tried to log an entry bigger than 1024 bytes"));
+            return;
         }
-        let stamp = get_current_time();
-        self.log.push_str(&format!("{}", &stamp));
-        self.log.push(';');
-        self.log.push_str(s);
-        self.log_size = self.log.len();
-        if self.log_size > 1024 {
-            let log_path = format!("{}/{}.txt", self.path, self.loghead);
-            match fs::write(log_path, &self.log) {
+        self.log.push(format!("{}; {}\n", unix_time_to_real(get_current_time()), s));
+        if size_of_val(self.log.as_slice()) > 1_000_000 {
+            let log_path = format!("{}/{}.txt", self.path, unix_time_to_real(self.loghead));
+            let mut printer = "".to_owned();
+            for line in self.log.iter() {
+                printer.push_str(line);
+            }
+            match fs::write(log_path, printer) {
                 Ok(_) => self.logs_made += 1,
-                Err(_) => panic!()
-
+                Err(why) => panic!("{}", why),
             };
-            self.log = "".to_owned();
+            self.log.clear();
         }
+    }
+
+
+}
+
+impl Drop for Logger {
+    fn drop(&mut self) {
+        let log_path = format!("{}/{}.txt", self.path, unix_time_to_real(self.loghead));
+        let mut printer = "".to_owned();
+        for line in self.log.iter() {
+            printer.push_str(line);
+        }
+        match fs::write(log_path, printer) {
+            Ok(_) => self.logs_made += 1,
+            Err(why) => panic!("{}", why),
+        };
     }
 }
 
 #[cfg(test)]
 mod tests {
+
     use crate::{Logger, get_current_time};
     #[test]
     fn test_destructor() {
@@ -137,6 +132,17 @@ mod tests {
             i += 1;
         }
         logger.add(&s);
+    }
+
+    #[test]
+    fn test_many_logs() {
+        let mut i = 0;
+        let mut logger = Logger::new("logs".to_owned());
+        while i <1_000_000 {
+            logger.add(&format!("Log nr. {}", i));
+            i += 1;
+        }
+        println!("{}", logger.loghead);
     }
 
     #[test]
