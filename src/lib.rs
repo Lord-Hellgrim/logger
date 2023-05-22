@@ -2,6 +2,11 @@ use std::fmt::{Display, self};
 use std::fs;
 use std::mem::{size_of_val};
 
+#[cfg(target_os="windows")]
+pub const PATH_SEP: char = '\\';
+#[cfg(target_os="linux")]
+pub const PATH_SEP: char = '/';
+
 pub struct LogTimeStamp {
     time: u64,
 }
@@ -45,7 +50,14 @@ pub fn unix_time_to_real(seconds: u64) -> String {
     else if days > 334 && days <= 366 {months = 12; days -= 334}
     else {months = 12;}
 
-    format!("{}.{}.{} - {}:{}:{}", days, months, 1970 + seconds / YEAR, (seconds%DAY)/HOUR, (seconds%HOUR)/MINUTE, seconds%MINUTE)
+    let minutes: String;
+    if (seconds%HOUR)/MINUTE < 10 {
+        minutes = format!("0{}", (seconds%HOUR)/MINUTE);
+    } else {
+        minutes = format!("{}", (seconds%HOUR)/MINUTE);
+    }
+
+    format!("{}.{}.{} - {};{};{}", days, months, 1970 + seconds / YEAR, (seconds%DAY)/HOUR, minutes, seconds%MINUTE)
 }
 
 
@@ -77,7 +89,7 @@ impl Logger {
         }
         self.log.push(format!("{}; {}\n", unix_time_to_real(get_current_time()), s));
         if size_of_val(self.log.as_slice()) > 1_000_000 {
-            let log_path = format!("{}/{}.txt", self.path, unix_time_to_real(self.loghead));
+            let log_path = format!("{}{}{}.txt", self.path, PATH_SEP, unix_time_to_real(self.loghead));
             let mut printer = "".to_owned();
             for line in self.log.iter() {
                 printer.push_str(line);
@@ -95,14 +107,18 @@ impl Logger {
 
 impl Drop for Logger {
     fn drop(&mut self) {
-        let log_path = format!("{}/{}.txt", self.path, unix_time_to_real(self.loghead));
+        let log_path = format!("{}{}{}.txt", self.path, PATH_SEP, unix_time_to_real(self.loghead));
+        let log_path_clone = log_path.clone();
         let mut printer = "".to_owned();
         for line in self.log.iter() {
             printer.push_str(line);
         }
         match fs::write(log_path, printer) {
             Ok(_) => self.logs_made += 1,
-            Err(why) => panic!("{}", why),
+            Err(why) => {
+                println!("{}", log_path_clone);
+                panic!("{}", why)
+            },
         };
     }
 }
@@ -110,7 +126,7 @@ impl Drop for Logger {
 #[cfg(test)]
 mod tests {
 
-    use crate::{Logger, get_current_time};
+    use crate::{Logger, get_current_time, PATH_SEP};
     #[test]
     fn test_destructor() {
         let mut logger = Logger::new("logs".to_owned());
@@ -148,5 +164,10 @@ mod tests {
     #[test]
     fn test_timestamp() {
         println!("{}", get_current_time());
+    }
+
+    #[test]
+    fn test_test() {
+        println!("{}{}{}", "logs", PATH_SEP, "filename");
     }
 }
